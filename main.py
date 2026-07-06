@@ -10,14 +10,31 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = "8607261709:AAFVLk2WjZibbGUBqq3B_JjVjZkB5SrkdKI"
 TELEGRAM_CHAT_ID = "1336984102"
 
-# Hisselerin resmi halka arz fiyatları ve hesaba düşen tahmini lot miktarları
-HALKA_ARZ_VERILERI = {
-    "BETAE": {"arz_fiyati": 42.50, "lot": 15, "tavan_serisi": 4},
-    "ORZAX": {"arz_fiyati": 18.20, "lot": 35, "tavan_serisi": 0},
-    "EKIM":  {"arz_fiyati": 85.00, "lot": 8, "tavan_serisi": 0},
-    "ISVEA": {"arz_fiyati": 23.40, "lot": 25, "tavan_serisi": 0},
-    "GOLDA": {"arz_fiyati": 12.80, "lot": 50, "tavan_serisi": 0}
+# İnternet bağlantısı koptuğunda veya repoda hisse bulunamadığında devreye girecek yedek liste
+YEDEK_HALKA_ARZ_VERILERI = {
+    "BETAE": {"arz_fiyati": 40.00, "lot": 15},
+    "ORZAX": {"arz_fiyati": 18.20, "lot": 35},
+    "EKIM":  {"arz_fiyati": 85.00, "lot": 8},
+    "ISVEA": {"arz_fiyati": 23.40, "lot": 25},
+    "GOLDA": {"arz_fiyati": 12.80, "lot": 50}
 }
+
+def guncel_halka_arz_verilerini_indir():
+    """
+    Herkese açık güncel bir halka arz takip reposundan/API'sinden 
+    tüm güncel halka arz fiyatlarını ve başlangıç verilerini çeker.
+    """
+    # Halka arz verilerini güncel tutan açık kaynaklı bir havuz linki
+    # (Buraya ileride kendi özel JSON linkinizi veya dinamik bülten API'nizi de bağlayabiliriz)
+    url = "https://raw.githubusercontent.com/fatiharsln/halka-arz-verileri/main/data.json"
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            print("Güncel halka arz fiyat listesi uzak repodan başarıyla alındı.")
+            return response.json()
+    except Exception as e:
+        print(f"Uzak repodan veri çekilemedi, yerel emniyet listesi kullanılacak: {e}")
+    return YEDEK_HALKA_ARZ_VERILERI
 
 def telegram_mesaj_gonder(mesaj):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -45,31 +62,31 @@ def canli_borsa_verisi_al(hisse_adi):
         print(f"{hisse_adi} fiyat çekme hatası: {e}")
     return None
 
-def tavan_ve_kar_hesapla(hisse_adi, guncel_fiyat):
-    arz_fiyati = HALKA_ARZ_VERILERI[hisse_adi]["arz_fiyati"]
-    lot_miktari = HALKA_ARZ_VERILERI[hisse_adi]["lot"]
-    
-    if not guncel_fiyat:
-        tavan_sayisi = HALKA_ARZ_VERILERI[hisse_adi]["tavan_serisi"]
-        guncel_fiyat = arz_fiyati * (1.10 ** tavan_sayisi)
-        not_canli = " (Tahmini)"
+def tavan_ve_kar_hesapla(hisse_adi, guncel_fiyat, halka_arz_havuzu):
+    # Eğer uzak repoda veya yedek listede hisse varsa oradan çek
+    if hisse_adi in halka_arz_havuzu:
+        arz_fiyati = halka_arz_havuzu[hisse_adi]["arz_fiyati"]
+        lot_miktari = halka_arz_havuzu[hisse_adi].get("lot", 15)
     else:
-        not_canli = ""
-        tavan_sayisi = 0
-        gecici_fiyat = arz_fiyati
-        while gecici_fiyat * 1.095 < guncel_fiyat:
-            gecici_fiyat *= 1.10
-            tavan_sayisi += 1
-            if tavan_sayisi > 20: break
+        # Repoda hiç yoksa varsayılan koruma değerleri
+        arz_fiyati = 10.00
+        lot_miktari = 15
+
+    if not guncel_fiyat:
+        return arz_fiyati, "İşlem Bekliyor", "0.00 TL", "%0.00", "BEKLEMEDE"
+
+    # Tavan Sayısı Hesaplama (%9.5 marj emniyetli)
+    tavan_sayisi = 0
+    gecici_fiyat = arz_fiyati
+    while gecici_fiyat * 1.095 < guncel_fiyat:
+        gecici_fiyat *= 1.10
+        tavan_sayisi += 1
+        if tavan_sayisi > 20: break
 
     toplam_degisim_yuzdesi = ((guncel_fiyat - arz_fiyati) / arz_fiyati) * 100
     net_kar = (guncel_fiyat - arz_fiyati) * lot_miktari
     
-    if tavan_sayisi > 0:
-        tavan_durumu = f"{tavan_sayisi}. Tavan{not_canli}"
-    else:
-        tavan_durumu = "Halka Arz Fiyatında" if not_canli == "" else "İşlem Bekliyor"
-        
+    tavan_durumu = f"{tavan_sayisi}. Tavan" if tavan_sayisi > 0 else "Halka Arz Fiyatında"
     kar_metni = f"+{net_kar:.2f} TL" if net_kar >= 0 else f"{net_kar:.2f} TL"
     
     if tavan_sayisi >= 7: alarm = "SAT (Kritik Eşik)"
@@ -79,44 +96,46 @@ def tavan_ve_kar_hesapla(hisse_adi, guncel_fiyat):
     return guncel_fiyat, tavan_durumu, kar_metni, f"%{toplam_degisim_yuzdesi:.2f}", alarm
 
 def borsa_raporu_olustur_ve_gonder():
-    """Raporu hazırlar ve Telegram'a fırlatır."""
-    print("Borsa raporu tetiklendi...")
+    print("Dinamik borsa raporu tetiklendi...")
+    
+    # Her sorguda önce uzak repodaki en güncel halka arz fiyat tablosunu çekiyoruz
+    halka_arz_havuzu = guncel_halka_arz_verilerini_indir()
+    
     hisseler = ["BETAE", "ORZAX", "EKIM", "ISVEA", "GOLDA"]
-    rapor_mesaji = "📊 **Otomatik Canlı Tavan ve Kâr Raporu**\n\n"
+    rapor_mesaji = "📊 **Uzak Repo Destekli Canlı Tavan ve Kâr Raporu**\n\n"
     
     for hisse in hisseler:
         api_fiyati = canli_borsa_verisi_al(hisse)
-        fiyat, tavan_durumu, kar_durumu, yuzde_degisim, alarm = tavan_ve_kar_hesapla(hisse, api_fiyati)
-        arz_fiyati = HALKA_ARZ_VERILERI[hisse]["arz_fiyati"]
+        fiyat, tavan_durumu, kar_durumu, yuzde_degisim, alarm = tavan_ve_kar_hesapla(hisse, api_fiyati, halka_arz_havuzu)
+        
+        # Hisse havuzda varsa fiyatını mesajda göster
+        arz_fiyati = halka_arz_havuzu.get(hisse, {}).get("arz_fiyati", 0.00)
         
         rapor_mesaji += (
             f"🔹 **{hisse}** (Arz: {arz_fiyati:.2f} TL)\n"
             f"  • Güncel Değer: {fiyat:.2f} TL ({yuzde_degisim})\n"
             f"  • Tavan Durumu: {tavan_durumu}\n"
-            f"  • Toplam Kâr: {kar_durumu}\n"
+            f"  • Toplam Kâr: {kar_metni if 'kar_metni' in locals() else kar_durumu}\n"
             f"  • **Sinyal/Alarm: {alarm}**\n\n"
         )
         
-    rapor_mesaji += "🔄 _Sistem 10 dakikalık periyotlarla otomatik çalışmaktadır._"
+    rapor_mesaji += "🔄 _Sistem verileri dinamik repodan alarak 10 dakikada bir çalışmaktadır._"
     telegram_mesaj_gonder(rapor_mesaji)
 
 def arka_plan_dongusu():
-    """Flask'tan bağımsız, arka planda 10 dakikada bir çalışacak zamanlayıcı."""
-    # Sunucunun tam oturması için ilk açılışta 5 saniye bekle ve ilk mesajı at
     time.sleep(5)
     borsa_raporu_olustur_ve_gonder()
     
     while True:
-        time.sleep(600)  # 10 dakika uyku
+        time.sleep(600)
         borsa_raporu_olustur_ve_gonder()
 
 # ==========================================
 
 @app.route('/')
 def home():
-    return "7/24 Otomatik Zaman Ayarlı Borsa Botu Aktif!"
+    return "Dinamik Repo Bağlantılı Borsa Botu Aktif!"
 
-# Flask uygulamasının kilitlenmemesi için döngüyü arka planda tetikliyoruz
 def botu_baslat():
     t = Thread(target=arka_plan_dongusu)
     t.daemon = True

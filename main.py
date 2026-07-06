@@ -1,5 +1,6 @@
 import time
 import requests
+import os
 from threading import Thread
 from flask import Flask
 
@@ -11,8 +12,8 @@ def home():
     return "Bot internette 7/24 aktif olarak çalışıyor!"
 
 def run_web_server():
-    # Render veya Koyeb'in botu açık tutması için bir web portu açıyoruz
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
 # ==================== SİZİN AYARLARINIZ ====================
 TELEGRAM_TOKEN = "8607261709:AAFVLk2WjZibbGUBqq3B_JjVjZkB5SrkdKI"
@@ -43,7 +44,6 @@ def canli_derinlik_verisi_al(hisse_kodu):
 
 def bot_ana_dongu():
     print("📈 Tavan takip döngüsü başlatıldı...")
-    telegram_mesaj_gonder("🚀 *Tavan Takip Botu Online Sistemde Aktif!*")
     
     while True:
         hisse_kalan_aktif = False
@@ -70,11 +70,13 @@ def bot_ana_dongu():
             
         time.sleep(KONTROL_PERIYODU)
 
-# --- BOTU VE WEB SUNUCUSUNU AYNI ANDA ÇALIŞTIRMA ---
+# --- SİSTEM BAŞLANGICI ---
 if __name__ == "__main__":
-    # Web sunucusunu arka planda başlat
+    # KOD RENDER ÜZERİNDE BAŞLADIĞI AN İLK OLARAK BU TEST MESAJINI ATACAK:
+    telegram_mesaj_gonder("🔔 *BOT BAĞLANTI TESTİ BAŞARILI!*\n\nRender sistemi üzerinden kodunuz tetiklendi ve şu an internette aktif. Tavan takip sistemi hazır!")
+
+    # Web sunucusunu ve ana döngüyü başlat
     server_thread = Thread(target=run_web_server)
     server_thread.start()
-    
-    # Ana borsa takip döngüsünü başlat
     bot_ana_dongu()
+

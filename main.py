@@ -19,64 +19,50 @@ def telegram_mesaj_gonder(mesaj):
         return False
 
 # ==========================================
-# GÜNCEL KESİN MYNET VERİ KAZIMA ALGORİTMASI
+# RESMİ YAHOO FINANCE API VERİ BAĞLANTISI
 # ==========================================
 
 def canli_borsa_verisi_al(hisse_adi):
     """
-    Mynet Finans üzerindeki doğru HTML etiketlerini tarayarak
-    hisselerin gerçek fiyat ve yüzde değişimini çeker.
+    Kütüphanesiz, doğrudan Yahoo Finance API üzerinden 
+    BIST hisselerinin anlık fiyatını ve değişimini çeker.
     """
-    # Link düzeltildi: finans.mynet.com
-    url = f"https://finans.mynet.com/borsa/hisseler/{hisse_adi.lower()}"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    # Borsa İstanbul için hisse sonuna .IS ekliyoruz
+    ticker = f"{hisse_adi.upper()}.IS"
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+    
+    # Engellenmemek için standart tarayıcı başlığı (Header) ekliyoruz
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     
     try:
         response = requests.get(url, headers=headers, timeout=5)
         if response.status_code == 200:
-            html = response.text
+            data = response.json()
             
-            fiyat = "Bulunamadı"
-            degisim = "%0.0"
+            # API'den gelen verinin içindeki fiyatı ve dünkü kapanışı ayıklıyoruz
+            meta = data.get("chart", {}).get("result", [{}])[0].get("meta", {})
+            fiyat = meta.get("regularMarketPrice")
+            onceki_kapanis = meta.get("previousClose")
             
-            # Mynet'in güncel fiyatı barındırdığı sınıfları tarıyoruz
-            if 'class="fn-fiyat' in html:
-                parca_fiyat = html.split('class="fn-fiyat')
-                if len(parca_fiyat) > 1:
-                    # Etiketin içindeki saf rakamı temizle
-                    fiyat = parca_fiyat[1].split('>')[1].split('<')[0].strip()
-            elif 'id="seans_fiyat"' in html:
-                parca_fiyat = html.split('id="seans_fiyat">')
-                if len(parca_fiyat) > 1:
-                    fiyat = parca_fiyat[1].split('<')[0].strip()
-                    
-            # Yüzde değişimi yakalıyoruz
-            if 'class="fn-oran' in html:
-                parca_degisim = html.split('class="fn-oran')
-                if len(parca_degisim) > 1:
-                    degisim = parca_degisim[1].split('>')[1].split('<')[0].strip()
-            elif 'id="seans_degisim"' in html:
-                parca_degisim = html.split('id="seans_degisim">')
-                if len(parca_degisim) > 1:
-                    degisim = parca_degisim[1].split('<')[0].strip()
-            
-            if fiyat != "Bulunamadı" and fiyat != "" and fiyat != "0" and fiyat != "0,00":
-                return f"{fiyat} TL", degisim
+            if fiyat and onceki_kapanis:
+                # Günlük yüzde değişimi hesapla
+                yuzde_degisim = ((fiyat - onceki_kapanis) / onceki_kapanis) * 100
+                return f"{fiyat:.2f} TL", f"%{yuzde_degisim:.2f}"
                 
     except Exception as e:
-        print(f"{hisse_adi} Güncel Mynet hatası: {e}")
+        print(f"{hisse_adi} Yahoo API hatası: {e}")
         
     return "İşlem Görmüyor (0.00 TL)", "%0.0"
 
 # ==========================================
-# HARMANLANMIŞ CANLI VERİLİ BORSA TAKİBİ
+# HARMANLANMIŞ GERÇEK VERİLİ BORSA TAKİBİ
 # ==========================================
 
 def borsa_tavan_takip_sistemi():
-    print("Mynet kesin veri sistemi tetiklendi...")
+    print("Yahoo API canlı borsa takip sistemi tetiklendi...")
     
     hisseler = ["BETAE", "ORZAX", "EKIM", "ISVEA", "GOLDA"]
-    rapor_mesaji = "📊 **Canlı Harmanlanmış Borsa Raporu (Mynet Güncel)**\n\n"
+    rapor_mesaji = "📊 **Canlı Harmanlanmış Resmi Borsa Raporu**\n\n"
     
     for hisse in hisseler:
         guncel_fiyat, degisim = canli_borsa_verisi_al(hisse)
@@ -86,8 +72,7 @@ def borsa_tavan_takip_sistemi():
             kar_durumu = "0 TL"
             alarm = "BEKLEMEDE (Halka Arz)"
         else:
-            tavan_durumu = "Canlı Takipte (Tavan Serisi)"
-            # İleride buraya tam elinizdeki lot sayısı/maliyet girilince kârı otomatik basacak
+            tavan_durumu = "Canlı Takipte (Tahta Açık)"
             kar_durumu = "Hesaplanıyor..." 
             alarm = "SATMA (Bekle)"
             
@@ -100,18 +85,18 @@ def borsa_tavan_takip_sistemi():
             f"  • **Sinyal/Alarm: {alarm}**\n\n"
         )
     
-    rapor_mesaji += "🔄 _Sistem güncellenmiş Mynet hatları üzerinden tetiklendi._"
+    rapor_mesaji += "🔄 _Sistem resmi Yahoo Finance API hatları üzerinden tetiklendi._"
     telegram_mesaj_gonder(rapor_mesaji)
 
 # ==========================================
 
 @app.route('/')
 def home():
-    return "Mynet Güncel Borsa Botu Aktif!"
+    return "Yahoo API Canlı Borsa Botu Aktif!"
 
 try:
-    print("Uygulama düzeltilmiş linklerle başlatılıyor...")
-    telegram_mesaj_gonder("🚀 Bot linkleri ve tarama etiketleri güncellendi!")
+    print("Uygulama Yahoo API moduyla başlatılıyor...")
+    telegram_mesaj_gonder("🚀 Bot altyapısı resmi Yahoo Finance API sistemine bağlandı!")
     borsa_tavan_takip_sistemi()
 except Exception as e:
     print(f"Başlatma esnasında hata: {e}")

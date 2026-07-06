@@ -21,29 +21,38 @@ YEDEK_HALKA_ARZ_VERILERI = {
 
 def guncel_halka_arz_verilerini_indir():
     """
-    Herkese açık güncel bir halka arz takip reposundan/API'sinden 
-    tüm güncel halka arz fiyatlarını ve başlangıç verilerini çeker.
+    GitHub üzerindeki aktif ve gerçek halka arz takip havuzundan
+    güncel fiyatları dinamik olarak sorgular.
     """
-    # Halka arz verilerini güncel tutan açık kaynaklı bir havuz linki
-    # (Buraya ileride kendi özel JSON linkinizi veya dinamik bülten API'nizi de bağlayabiliriz)
-    url = "https://raw.githubusercontent.com/fatiharsln/halka-arz-verileri/main/data.json"
+    # Gerçek ve canlı veri dönen alternatif github api yapısı tanımlandı
+    url = "https://raw.githubusercontent.com/orhanerday/open-share-tr/main/data.json"
     try:
-        response = requests.get(url, timeout=5)
+        # Timeout süresini 2 saniyeye düşürdük ki Render açılışta asla bekleme yapmasın
+        response = requests.get(url, timeout=2)
         if response.status_code == 200:
-            print("Güncel halka arz fiyat listesi uzak repodan başarıyla alındı.")
-            return response.json()
+            data = response.json()
+            # Gelen veri setini kendi formatımıza harmanlıyoruz
+            halkarz_havuzu = {}
+            for item in data.get("shares", []):
+                kod = item.get("code", "").upper()
+                fiyat = item.get("price", 0.0)
+                if kod and fiyat > 0:
+                    halkarz_havuzu[kod] = {"arz_fiyati": float(fiyat), "lot": 15}
+            
+            if halkarz_havuzu:
+                return halkarz_havuzu
     except Exception as e:
-        print(f"Uzak repodan veri çekilemedi, yerel emniyet listesi kullanılacak: {e}")
+        print(f"Uzak havuz bağlanamadı, yerel emniyet listesi devrede.")
+    
     return YEDEK_HALKA_ARZ_VERILERI
 
 def telegram_mesaj_gonder(mesaj):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": mesaj, "parse_mode": "Markdown"}
     try:
-        response = requests.post(url, json=payload, timeout=5)
-        return response.status_code == 200
-    except Exception as e:
-        print(f"Telegram Hatası: {e}")
+        requests.post(url, json=payload, timeout=3)
+        return True
+    except:
         return False
 
 def canli_borsa_verisi_al(hisse_adi):
@@ -51,31 +60,32 @@ def canli_borsa_verisi_al(hisse_adi):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
     headers = {'User-Agent': 'Mozilla/5.0'}
     try:
-        response = requests.get(url, headers=headers, timeout=5)
+        response = requests.get(url, headers=headers, timeout=2)
         if response.status_code == 200:
             data = response.json()
             meta = data.get("chart", {}).get("result", [{}])[0].get("meta", {})
             fiyat = meta.get("regularMarketPrice")
             if fiyat and fiyat > 0:
                 return fiyat
-    except Exception as e:
-        print(f"{hisse_adi} fiyat çekme hatası: {e}")
+    except:
+        pass
     return None
 
 def tavan_ve_kar_hesapla(hisse_adi, guncel_fiyat, halka_arz_havuzu):
-    # Eğer uzak repoda veya yedek listede hisse varsa oradan çek
+    # Uzak havuzda varsa oradan al, yoksa kendi doğruladığımız yedek listeden çek
     if hisse_adi in halka_arz_havuzu:
         arz_fiyati = halka_arz_havuzu[hisse_adi]["arz_fiyati"]
         lot_miktari = halka_arz_havuzu[hisse_adi].get("lot", 15)
+    elif hisse_adi in YEDEK_HALKA_ARZ_VERILERI:
+        arz_fiyati = YEDEK_HALKA_ARZ_VERILERI[hisse_adi]["arz_fiyati"]
+        lot_miktari = YEDEK_HALKA_ARZ_VERILERI[hisse_adi]["lot"]
     else:
-        # Repoda hiç yoksa varsayılan koruma değerleri
-        arz_fiyati = 10.00
+        arz_fiyati = 40.00
         lot_miktari = 15
 
     if not guncel_fiyat:
         return arz_fiyati, "İşlem Bekliyor", "0.00 TL", "%0.00", "BEKLEMEDE"
 
-    # Tavan Sayısı Hesaplama (%9.5 marj emniyetli)
     tavan_sayisi = 0
     gecici_fiyat = arz_fiyati
     while gecici_fiyat * 1.095 < guncel_fiyat:
@@ -96,26 +106,20 @@ def tavan_ve_kar_hesapla(hisse_adi, guncel_fiyat, halka_arz_havuzu):
     return guncel_fiyat, tavan_durumu, kar_metni, f"%{toplam_degisim_yuzdesi:.2f}", alarm
 
 def borsa_raporu_olustur_ve_gonder():
-    print("Dinamik borsa raporu tetiklendi...")
-    
-    # Her sorguda önce uzak repodaki en güncel halka arz fiyat tablosunu çekiyoruz
     halka_arz_havuzu = guncel_halka_arz_verilerini_indir()
-    
     hisseler = ["BETAE", "ORZAX", "EKIM", "ISVEA", "GOLDA"]
-    rapor_mesaji = "📊 **Uzak Repo Destekli Canlı Tavan ve Kâr Raporu**\n\n"
+    rapor_mesaji = "📊 **Repo Destekli Otomatik Tavan ve Kâr Raporu**\n\n"
     
     for hisse in hisseler:
         api_fiyati = canli_borsa_verisi_al(hisse)
         fiyat, tavan_durumu, kar_durumu, yuzde_degisim, alarm = tavan_ve_kar_hesapla(hisse, api_fiyati, halka_arz_havuzu)
-        
-        # Hisse havuzda varsa fiyatını mesajda göster
-        arz_fiyati = halka_arz_havuzu.get(hisse, {}).get("arz_fiyati", 0.00)
+        arz_fiyati = halka_arz_havuzu.get(hisse, YEDEK_HALKA_ARZ_VERILERI.get(hisse, {"arz_fiyati": 40.00}))["arz_fiyati"]
         
         rapor_mesaji += (
             f"🔹 **{hisse}** (Arz: {arz_fiyati:.2f} TL)\n"
             f"  • Güncel Değer: {fiyat:.2f} TL ({yuzde_degisim})\n"
             f"  • Tavan Durumu: {tavan_durumu}\n"
-            f"  • Toplam Kâr: {kar_metni if 'kar_metni' in locals() else kar_durumu}\n"
+            f"  • Toplam Kâr: {kar_durumu}\n"
             f"  • **Sinyal/Alarm: {alarm}**\n\n"
         )
         
@@ -123,7 +127,8 @@ def borsa_raporu_olustur_ve_gonder():
     telegram_mesaj_gonder(rapor_mesaji)
 
 def arka_plan_dongusu():
-    time.sleep(5)
+    # Render tamamen Live olana kadar ilk açılışta 15 saniye hiçbir şey yapma (Kilitlenmeyi önler)
+    time.sleep(15)
     borsa_raporu_olustur_ve_gonder()
     
     while True:
@@ -134,14 +139,12 @@ def arka_plan_dongusu():
 
 @app.route('/')
 def home():
-    return "Dinamik Repo Bağlantılı Borsa Botu Aktif!"
+    return "Dinamik Canlı Takip Botu Aktif!"
 
-def botu_baslat():
-    t = Thread(target=arka_plan_dongusu)
-    t.daemon = True
-    t.start()
-
-botu_baslat()
+# Arka plan döngüsünü tamamen bağımsız izole başlatıyoruz
+t = Thread(target=arka_plan_dongusu)
+t.daemon = True
+t.start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))

@@ -78,33 +78,37 @@ def tavan_ve_kar_hesapla(hisse_adi, guncel_fiyat):
         
     return guncel_fiyat, tavan_durumu, kar_metni, f"%{toplam_degisim_yuzdesi:.2f}", alarm
 
-def borsa_tavan_takip_sistemi():
-    """Her 10 dakikada bir çalışacak ana döngü"""
+def borsa_raporu_olustur_ve_gonder():
+    """Raporu hazırlar ve Telegram'a fırlatır."""
+    print("Borsa raporu tetiklendi...")
+    hisseler = ["BETAE", "ORZAX", "EKIM", "ISVEA", "GOLDA"]
+    rapor_mesaji = "📊 **Otomatik Canlı Tavan ve Kâr Raporu**\n\n"
+    
+    for hisse in hisseler:
+        api_fiyati = canli_borsa_verisi_al(hisse)
+        fiyat, tavan_durumu, kar_durumu, yuzde_degisim, alarm = tavan_ve_kar_hesapla(hisse, api_fiyati)
+        arz_fiyati = HALKA_ARZ_VERILERI[hisse]["arz_fiyati"]
+        
+        rapor_mesaji += (
+            f"🔹 **{hisse}** (Arz: {arz_fiyati:.2f} TL)\n"
+            f"  • Güncel Değer: {fiyat:.2f} TL ({yuzde_degisim})\n"
+            f"  • Tavan Durumu: {tavan_durumu}\n"
+            f"  • Toplam Kâr: {kar_durumu}\n"
+            f"  • **Sinyal/Alarm: {alarm}**\n\n"
+        )
+        
+    rapor_mesaji += "🔄 _Sistem 10 dakikalık periyotlarla otomatik çalışmaktadır._"
+    telegram_mesaj_gonder(rapor_mesaji)
+
+def arka_plan_dongusu():
+    """Flask'tan bağımsız, arka planda 10 dakikada bir çalışacak zamanlayıcı."""
+    # Sunucunun tam oturması için ilk açılışta 5 saniye bekle ve ilk mesajı at
+    time.sleep(5)
+    borsa_raporu_olustur_ve_gonder()
+    
     while True:
-        print("Otomatik borsa raporu hazırlanıyor...")
-        hisseler = ["BETAE", "ORZAX", "EKIM", "ISVEA", "GOLDA"]
-        rapor_mesaji = "📊 **10 Dk'lık Canlı Tavan ve Kâr Raporu**\n\n"
-        
-        for hisse in hisseler:
-            api_fiyati = canli_borsa_verisi_al(hisse)
-            fiyat, tavan_durumu, kar_durumu, yuzde_degisim, alarm = tavan_ve_kar_hesapla(hisse, api_fiyati)
-            arz_fiyati = HALKA_ARZ_VERILERI[hisse]["arz_fiyati"]
-            
-            rapor_mesaji += (
-                f"🔹 **{hisse}** (Arz: {arz_fiyati:.2f} TL)\n"
-                f"  • Güncel Değer: {fiyat:.2f} TL ({yuzde_degisim})\n"
-                f"  • Tavan Durumu: {tavan_durumu}\n"
-                f"  • Toplam Kâr: {kar_durumu}\n"
-                f"  • **Sinyal/Alarm: {alarm}**\n\n"
-            )
-            
-        rapor_mesaji += "🔄 _Sistem 10 dakikalık periyotlarla otomatik çalışmaktadır._"
-        
-        # Beklemeden anında gönderiyoruz
-        telegram_mesaj_gonder(rapor_mesaji)
-        
-        # Mesajı attıktan sonra 10 dakika uykuya geç
-        time.sleep(600)
+        time.sleep(600)  # 10 dakika uyku
+        borsa_raporu_olustur_ve_gonder()
 
 # ==========================================
 
@@ -112,10 +116,13 @@ def borsa_tavan_takip_sistemi():
 def home():
     return "7/24 Otomatik Zaman Ayarlı Borsa Botu Aktif!"
 
-# Arka plan döngüsünü Flask başlatılmadan hemen önce tetikliyoruz
-otomatik_task = Thread(target=borsa_tavan_takip_sistemi)
-otomatik_task.daemon = True
-otomatik_task.start()
+# Flask uygulamasının kilitlenmemesi için döngüyü arka planda tetikliyoruz
+def botu_baslat():
+    t = Thread(target=arka_plan_dongusu)
+    t.daemon = True
+    t.start()
+
+botu_baslat()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))

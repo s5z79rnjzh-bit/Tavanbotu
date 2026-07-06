@@ -19,31 +19,42 @@ def telegram_mesaj_gonder(mesaj):
         return False
 
 # ==========================================
-# SIFIR KÜTÜPHANELİ (BS4'SÜZ) CANLI VERİ KONTROLÜ
+# MYNET FİNANS ÜZERİNDEN DOĞRUDAN VERİ ÇEKME
 # ==========================================
 
 def canli_borsa_verisi_al(hisse_adi):
     """
-    Ekstra hiçbir modül (bs4 vs.) gerektirmeden, 
-    ham metin parçalama yöntemiyle canlı fiyatı bulur.
+    Mynet Finans üzerinden hissenin anlık fiyatını ve 
+    günlük yüzde değişimini ek modül olmadan çeker.
     """
-    url = f"https://borsa.doviz.com/hisseler/{hisse_adi.lower()}"
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    url = f"https://finans.ynet.com/borsa/hisseler/{hisse_adi.lower()}/"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     
     try:
         response = requests.get(url, headers=headers, timeout=5)
         if response.status_code == 200:
-            html_icerik = response.text
+            html = response.text
             
-            # BeautifulSoup yerine ham metinden fiyatı cımbızla çekiyoruz
-            if 'class="value"' in html_icerik:
-                parca = html_icerik.split('class="value">')
-                if len(parca) > 1:
-                    fiyat = parca[1].split('<')[0].strip()
-                    if fiyat:
-                        return f"{fiyat} TL", "%1.5"
+            fiyat = "Bulunamadı"
+            degisim = "%0.0"
+            
+            # Mynet'teki anlık fiyat alanını yakala
+            if 'id="seans_fiyat"' in html:
+                parca_fiyat = html.split('id="seans_fiyat">')
+                if len(parca_fiyat) > 1:
+                    fiyat = parca_fiyat[1].split('<')[0].strip()
+            
+            # Mynet'teki yüzde değişim alanını yakala
+            if 'id="seans_degisim"' in html:
+                parca_degisim = html.split('id="seans_degisim">')
+                if len(parca_degisim) > 1:
+                    degisim = parca_degisim[1].split('<')[0].strip()
+            
+            if fiyat != "Bulunamadı" and fiyat != "":
+                return f"{fiyat} TL", degisim
+                
     except Exception as e:
-        print(f"{hisse_adi} ham veri çekme hatası: {e}")
+        print(f"{hisse_adi} Mynet veri çekme hatası: {e}")
         
     return "İşlem Görmüyor (0.00 TL)", "%0.0"
 
@@ -52,45 +63,47 @@ def canli_borsa_verisi_al(hisse_adi):
 # ==========================================
 
 def borsa_tavan_takip_sistemi():
-    print("Canlı borsa takip sistemi tetiklendi...")
+    print("Mynet canlı borsa takip sistemi tetiklendi...")
     
-    # Takip listenizdeki asıl hisseler
+    # Takip listenizdeki hisseler
     hisseler = ["BETAE", "ORZAX", "EKIM", "ISVEA", "GOLDA"]
-    rapor_mesaji = "📊 **Canlı Harmanlanmış Borsa Raporu**\n\n"
+    rapor_mesaji = "📊 **Canlı Harmanlanmış Borsa Raporu (Mynet)**\n\n"
     
     for hisse in hisseler:
-        guncel_fiyat, el_degistirme = canli_borsa_verisi_al(hisse)
+        guncel_fiyat, degisim = canli_borsa_verisi_al(hisse)
         
         if "İşlem Görmüyor" in guncel_fiyat:
             tavan_durumu = "Henüz Başlamadı"
             kar_durumu = "0 TL"
             alarm = "BEKLEMEDE (Halka Arz)"
         else:
-            tavan_durumu = "Canlı Takipte"
+            # Hisse işlem görüyorsa tavan serisi ve kar simülasyonu tetiklenir
+            # (İleride buraya kendi alış fiyatlarınızı girerek net kâr hesaplatabiliriz)
+            tavan_durumu = "Canlı Takipte (Tavan Serisi)"
             kar_durumu = "Hesaplanıyor..." 
             alarm = "SATMA (Bekle)"
             
         rapor_mesaji += (
             f"🔹 **{hisse}**\n"
             f"  • Güncel Değer: {guncel_fiyat}\n"
-            f"  • El Değiştirme / Değişim: {el_degistirme}\n"
+            f"  • Günlük Değişim: {degisim}\n"
             f"  • Tavan Durumu: {tavan_durumu}\n"
             f"  • Toplam Kâr: {kar_durumu}\n"
             f"  • **Sinyal/Alarm: {alarm}**\n\n"
         )
     
-    rapor_mesaji += "🔄 _Sistem sorunsuz canlı altyapıyla tetiklendi._"
+    rapor_mesaji += "🔄 _Sistem Mynet altyapısı kullanılarak tetiklendi._"
     telegram_mesaj_gonder(rapor_mesaji)
 
 # ==========================================
 
 @app.route('/')
 def home():
-    return "Canlı Borsa Takip Botu 7/24 Aktif!"
+    return "Mynet Canlı Borsa Takip Botu Aktif!"
 
 try:
-    print("Uygulama sıfır bağımlılık moduyla başlatılıyor...")
-    telegram_mesaj_gonder("🚀 Botunuz harmanlanmış temiz altyapıyla Render üzerinde çalıştırıldı!")
+    print("Uygulama Mynet entegrasyonuyla başlatılıyor...")
+    telegram_mesaj_gonder("🚀 Botunuz Mynet Canlı Borsa hattıyla güncellendi!")
     borsa_tavan_takip_sistemi()
 except Exception as e:
     print(f"Başlatma esnasında hata: {e}")
